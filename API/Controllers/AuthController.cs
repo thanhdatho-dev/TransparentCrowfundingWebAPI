@@ -1,21 +1,31 @@
 ﻿using Application.Interfaces.Services;
 using Domain.DTOs.Auth;
 using Domain.DTOs.Services.MailSender;
+using Domain.DTOs.Services.WalletSignature;
 using Domain.Entities;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 
 namespace API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class AuthController(IMailService mailService, UserManager<User> userManager, IConfiguration config) : ControllerBase
+    public class AuthController(
+        IMailService mailService, 
+        UserManager<User> userManager, 
+        IConfiguration config,
+        IWalletSignatureVerifier signatureVerifier,
+        ITokenService tokenService) : ControllerBase
     {
         private readonly IMailService _mailService = mailService;
         private readonly UserManager<User> _userManager = userManager;
         private readonly IConfiguration _config = config;
+        private readonly IWalletSignatureVerifier _signatureVerifier = signatureVerifier;
+        private readonly ITokenService _tokenService = tokenService;
 
         [EnableRateLimiting("fixed")]
         [HttpPost("email-verify")]
@@ -23,23 +33,28 @@ namespace API.Controllers
         {
             try
             {
-                // Email đã tồn tại, 
+                // Signature đã verify ở SignIn Controller, không cần verify lại
+                var walletSignature = emailVerifyDto.WalletSignature;
+                if (walletSignature == null)
+                    return BadRequest("Wallet Signature is missing");
+                // Verify Email sử dụng AWS SES làm sender
                 string? email = emailVerifyDto.Email;
                 if (string.IsNullOrEmpty(email))
                     return BadRequest("Email is missing");
 
-                var user = await _userManager.FindByEmailAsync(email);
+                var user = await _userManager.FindByNameAsync(walletSignature.Address);
                 if (user == null)
                 {
                     user = new User
                     {
-                        UserName = email,
+                        UserName = walletSignature.Address,
                         Email = email
                     };
                     var createUser = await _userManager.CreateAsync(user);
                     if (!createUser.Succeeded)
-                        return StatusCode(400, createUser.Errors);
+                        return BadRequest(createUser.Errors);
                 }
+
                 // Tạo Token xác thực Email
                 var emailToken = await _userManager.GenerateEmailConfirmationTokenAsync(user);
                 if (emailToken == null) return NotFound("Không thể tạo token xác thực email");
@@ -57,7 +72,7 @@ namespace API.Controllers
 
                 await _mailService.SendEmailAsync(mailRequest);
                 await _userManager.UpdateAsync(user);
-                return Ok("Đăng ký thành công, vui lòng xác nhận email.");                
+                return Ok(confirmUrl);                
             }
             catch (Exception ex)
             {
@@ -65,7 +80,56 @@ namespace API.Controllers
             }
         }
 
+        [EnableRateLimiting("fixed")]
+        [HttpPost("sign-in")]
+        public async Task<IActionResult> SignIn([FromBody] WalletSignatureDto walletSignatureDto)
+        {
+            try
+            {
+                bool signatureVerifyStatus = _signatureVerifier.VerifySignature(walletSignatureDto.Message, walletSignatureDto.Signature, walletSignatureDto.Address);
+                if (!signatureVerifyStatus)
+                {
+                    return BadRequest(new
+                    {
+                        ErrorCode = "WalletVerificationFailed",
+                        Message = "Wallet verification failed",
+                        NextAction = "GoHome"
+                    });
+                }
 
+
+                var user = await _userManager.Users.FirstOrDefaultAsync(x => x.UserName == walletSignatureDto.Address);
+                if (user == null || !user.EmailConfirmed)
+                {
+                    return BadRequest(new
+                    {
+                        ErrorCode = "EmailVerificationRequired",
+                        Message = "Email verification needed",
+                        NextAction = "VerifyEmail"
+                    });
+                }
+
+                var accesToken = _tokenService.GenerateAccessToken(user);
+                var refreshToken = _tokenService.GenerateRefreshToken();
+
+                user.RefreshToken = refreshToken;
+                var refreshTokenExpiryTime = user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+
+                SetRefreshTokenCookie(refreshToken, refreshTokenExpiryTime);
+
+                await _userManager.UpdateAsync(user);
+
+                return Ok(new
+                {
+                    UserId = user.Id,
+                    AccessTokne = accesToken,
+                });
+            }catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+        
         [EnableRateLimiting("fixed")]
         [HttpGet("confirm-email")]
         public async Task<IActionResult> ConfirmEmail(string userId, string token)
@@ -76,26 +140,54 @@ namespace API.Controllers
                     return BadRequest(ModelState);
 
                 if (userId == null || token == null)
-                    return StatusCode(400, "email hoặc token không hợp lệ");
+                    return BadRequest("email hoặc token không hợp lệ");
 
                 var user = await _userManager.FindByIdAsync(userId);
                 if (user == null)
-                    return StatusCode(400, "Người dùng không tồn tại");
+                    return BadRequest("Người dùng không tồn tại");
 
                 var result = await _userManager.ConfirmEmailAsync(user, token);
                 if (result.Succeeded)
                 {
-                    return Ok("Xác thực Email thành công");
+                    var accesToken = _tokenService.GenerateAccessToken(user);
+                    var refreshToken = _tokenService.GenerateRefreshToken();
+
+                    user.RefreshToken = refreshToken;
+                    var refreshTokenExpiryTime = user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+
+                    SetRefreshTokenCookie(refreshToken, refreshTokenExpiryTime);
+                    await _userManager.UpdateAsync(user);
+                    return Ok(new
+                    {
+                        UserId = user.Id,
+                        AccessTokne = accesToken,
+                    }); 
                 }
                 else
                 {
-                    return StatusCode(400, "Xác thực Email thất bại");
+                    return BadRequest("Xác thực Email thất bại");
                 }
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Đã có lỗi xảy ra trong quá trình xác thực Email {ex.Message}");
+                return BadRequest($"Đã có lỗi xảy ra trong quá trình xác thực Email {ex.Message}");
             }
+        }
+
+        
+        private void SetRefreshTokenCookie(string refreshToken, DateTime? expires)
+        {
+            var cookieOptions = new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Expires = expires,
+                IsEssential = true,
+                Path = "/"
+            };
+
+            Response.Cookies.Append("refreshToken", refreshToken, cookieOptions);
         }
     }
 }

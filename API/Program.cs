@@ -103,9 +103,12 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("MailSettings"));
+builder.Services.Configure<JWT>(builder.Configuration.GetSection("JWT"));
 builder.Services.AddTransient(typeof(IGenericRepositoryAsync<>), typeof(GenericRepositoryAsync<>));
 builder.Services.AddTransient<IUnitOfWork, UnitOfWork>();
 builder.Services.AddTransient<IMailService, MailService>();
+builder.Services.AddTransient<IWalletSignatureVerifier, WalletSignatureVerifier>();
+builder.Services.AddTransient<ITokenService, TokenService>();
 
 var app = builder.Build();
 
