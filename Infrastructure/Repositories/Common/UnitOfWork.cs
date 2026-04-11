@@ -1,8 +1,5 @@
 ﻿using Application.Interfaces.Common;
 using Infrastructure.Contexts;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Infrastructure.Repositories.Common
 {
