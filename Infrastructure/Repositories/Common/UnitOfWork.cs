@@ -9,7 +9,7 @@ namespace Infrastructure.Repositories.Common
 
         public void Dispose() => _context.Dispose();
         
-        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
-            _context.SaveChangesAsync(cancellationToken);
+        public Task<int> SaveChangesAsync() =>
+            _context.SaveChangesAsync();
     }
 }

@@ -15,11 +15,11 @@ namespace Infrastructure.Repositories.Common
         public async Task DeleteAsync(T entity) =>
             _context.Set<T>().Remove(entity);
 
-        public async Task<T?> GetByIdAsync(Guid id) =>
-            await _context.Set<T>().FindAsync(id);
+        public async Task<T?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            await _context.Set<T>().FindAsync(id, cancellationToken);
 
-        public async Task<IReadOnlyList<T>> ListAsync(ISpecification<T> spec) =>
-            await SpecificationEvaluator.Default.GetQuery(_context.Set<T>(), spec).ToListAsync(); 
+        public async Task<IReadOnlyList<T>> ListAsync(ISpecification<T> spec, CancellationToken cancellationToken = default) =>
+            await SpecificationEvaluator.Default.GetQuery(_context.Set<T>(), spec).ToListAsync(cancellationToken); 
         
 
         public async Task UpdateAsync(T entity) =>

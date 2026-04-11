@@ -1,13 +1,10 @@
 ﻿using Application.Interfaces.Services;
-using Domain.Configurations;
 using Domain.DTOs.Auth;
 using Domain.DTOs.Services.MailSender;
 using Domain.Entities;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Net;
 
 namespace API.Controllers
@@ -20,6 +17,7 @@ namespace API.Controllers
         private readonly UserManager<User> _userManager = userManager;
         private readonly IConfiguration _config = config;
 
+        [EnableRateLimiting("fixed")]
         [HttpPost("email-verify")]
         public async Task<IActionResult> EmailVerify([FromBody] EmailVerifyDto emailVerifyDto)
         {
@@ -58,8 +56,7 @@ namespace API.Controllers
                 };
 
                 await _mailService.SendEmailAsync(mailRequest);
-
-
+                await _userManager.UpdateAsync(user);
                 return Ok("Đăng ký thành công, vui lòng xác nhận email.");                
             }
             catch (Exception ex)
@@ -69,7 +66,7 @@ namespace API.Controllers
         }
 
 
-
+        [EnableRateLimiting("fixed")]
         [HttpGet("confirm-email")]
         public async Task<IActionResult> ConfirmEmail(string userId, string token)
         {
