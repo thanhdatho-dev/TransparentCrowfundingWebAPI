@@ -7,11 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Features\Auth\Commands\" />
-    <Folder Include="Features\Auth\Queries\" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />
   </ItemGroup>
 

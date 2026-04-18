@@ -1,5 +1,5 @@
 ﻿
-namespace Domain.DTOs.Services.MailSender
+namespace Application.DTOs.Services.MailSender
 {
     public class MailRequest
     {

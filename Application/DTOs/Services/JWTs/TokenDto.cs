@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Domain.DTOs.Services.JWTs
+namespace Application.DTOs.Services.JWTs
 {
     public class TokenDto
     {

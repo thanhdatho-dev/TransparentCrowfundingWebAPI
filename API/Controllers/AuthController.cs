@@ -1,78 +1,43 @@
-﻿using Application.Interfaces.Services;
-using Domain.DTOs.Auth;
-using Domain.DTOs.Services.MailSender;
-using Domain.DTOs.Services.WalletSignature;
-using Domain.Entities;
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.AspNetCore.Identity;
+﻿using Application.DTOs.Auth;
+using Application.DTOs.Services.WalletSignature;
+using Application.Interfaces.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.EntityFrameworkCore;
-using System.Net;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 namespace API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class AuthController(
-        IMailService mailService, 
-        UserManager<User> userManager, 
-        IConfiguration config,
-        IWalletSignatureVerifier signatureVerifier,
-        ITokenService tokenService) : ControllerBase
+    public class AuthController(IAuthService authService) : ControllerBase
     {
-        private readonly IMailService _mailService = mailService;
-        private readonly UserManager<User> _userManager = userManager;
-        private readonly IConfiguration _config = config;
-        private readonly IWalletSignatureVerifier _signatureVerifier = signatureVerifier;
-        private readonly ITokenService _tokenService = tokenService;
+        private readonly IAuthService _authService = authService;
 
         [EnableRateLimiting("fixed")]
         [HttpPost("email-verify")]
-        public async Task<IActionResult> EmailVerify([FromBody] EmailVerifyDto emailVerifyDto)
+        public async Task<IActionResult> EmailVerify([FromBody] EmailVerifyDto dto)
         {
             try
             {
-                // Signature đã verify ở SignIn Controller, không cần verify lại
-                var walletSignature = emailVerifyDto.WalletSignature;
-                if (walletSignature == null)
-                    return BadRequest("Wallet Signature is missing");
-                // Verify Email sử dụng AWS SES làm sender
-                string? email = emailVerifyDto.Email;
-                if (string.IsNullOrEmpty(email))
-                    return BadRequest("Email is missing");
+                if (!ModelState.IsValid)
+                    return BadRequest(ModelState);
 
-                var user = await _userManager.FindByNameAsync(walletSignature.Address);
-                if (user == null)
+                if (string.IsNullOrEmpty(dto.Email))
+                    return BadRequest("Email is required");
+
+                var ws = dto.WalletSignature;
+                if (string.IsNullOrEmpty(ws?.Address) ||
+                    string.IsNullOrEmpty(ws.Signature) ||
+                    string.IsNullOrEmpty(ws.Message)
+                   )
+                    return BadRequest("Wallet signature information is incomplete.");
+
+                return Ok(new
                 {
-                    user = new User
-                    {
-                        UserName = walletSignature.Address,
-                        Email = email
-                    };
-                    var createUser = await _userManager.CreateAsync(user);
-                    if (!createUser.Succeeded)
-                        return BadRequest(createUser.Errors);
-                }
-
-                // Tạo Token xác thực Email
-                var emailToken = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-                if (emailToken == null) return NotFound("Không thể tạo token xác thực email");
-                var endcodeToken = WebUtility.UrlEncode(emailToken); //Mã hóa
-
-                //Gửi link xác nhận trỏ tới API endpoint
-                var confirmUrl = $"{_config["ApiBaseUrl"]}/api/Auth/confirm-email?userId={user.Id}&token={endcodeToken}";
-
-                var mailRequest = new MailRequest
-                {
-                    ToEmail = email,
-                    Subject = "Verify Email Message",
-                    Body = $"<p>Nhấn vào <a href='{confirmUrl}'>đây</a> để xác nhận email.</p>"
-                };
-
-                await _mailService.SendEmailAsync(mailRequest);
-                await _userManager.UpdateAsync(user);
-                return Ok(confirmUrl);                
+                    UserId = await _authService.VerifyEmailAsync(dto)
+                });
             }
             catch (Exception ex)
             {
@@ -81,92 +46,67 @@ namespace API.Controllers
         }
 
         [EnableRateLimiting("fixed")]
-        [HttpPost("sign-in")]
-        public async Task<IActionResult> SignIn([FromBody] WalletSignatureDto walletSignatureDto)
-        {
-            try
-            {
-                bool signatureVerifyStatus = _signatureVerifier.VerifySignature(walletSignatureDto.Message, walletSignatureDto.Signature, walletSignatureDto.Address);
-                if (!signatureVerifyStatus)
-                {
-                    return BadRequest(new
-                    {
-                        ErrorCode = "WalletVerificationFailed",
-                        Message = "Wallet verification failed",
-                        NextAction = "GoHome"
-                    });
-                }
-
-
-                var user = await _userManager.Users.FirstOrDefaultAsync(x => x.UserName == walletSignatureDto.Address);
-                if (user == null || !user.EmailConfirmed)
-                {
-                    return BadRequest(new
-                    {
-                        ErrorCode = "EmailVerificationRequired",
-                        Message = "Email verification needed",
-                        NextAction = "VerifyEmail"
-                    });
-                }
-
-                var accesToken = _tokenService.GenerateAccessToken(user);
-                var refreshToken = _tokenService.GenerateRefreshToken();
-
-                user.RefreshToken = refreshToken;
-                var refreshTokenExpiryTime = user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
-
-                SetRefreshTokenCookie(refreshToken, refreshTokenExpiryTime);
-
-                await _userManager.UpdateAsync(user);
-
-                return Ok(new
-                {
-                    UserId = user.Id,
-                    AccessTokne = accesToken,
-                });
-            }catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
-            }
-        }
-        
-        [EnableRateLimiting("fixed")]
-        [HttpGet("confirm-email")]
-        public async Task<IActionResult> ConfirmEmail(string userId, string token)
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] WalletSignatureDto ws)
         {
             try
             {
                 if (!ModelState.IsValid)
                     return BadRequest(ModelState);
 
-                if (userId == null || token == null)
-                    return BadRequest("email hoặc token không hợp lệ");
-
-                var user = await _userManager.FindByIdAsync(userId);
-                if (user == null)
-                    return BadRequest("Người dùng không tồn tại");
-
-                var result = await _userManager.ConfirmEmailAsync(user, token);
-                if (result.Succeeded)
+                if (string.IsNullOrEmpty(ws?.Address) ||
+                    string.IsNullOrEmpty(ws.Signature) ||
+                    string.IsNullOrEmpty(ws.Message))
                 {
-                    var accesToken = _tokenService.GenerateAccessToken(user);
-                    var refreshToken = _tokenService.GenerateRefreshToken();
-
-                    user.RefreshToken = refreshToken;
-                    var refreshTokenExpiryTime = user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
-
-                    SetRefreshTokenCookie(refreshToken, refreshTokenExpiryTime);
-                    await _userManager.UpdateAsync(user);
-                    return Ok(new
-                    {
-                        UserId = user.Id,
-                        AccessTokne = accesToken,
-                    }); 
+                    return BadRequest("Wallet signature information is incomplete.");
                 }
-                else
+
+                var loginDto = await _authService.LoginAsync(ws);
+
+                return Ok(new
                 {
-                    return BadRequest("Xác thực Email thất bại");
-                }
+                    loginDto.UserId,
+                    loginDto.AccessToken,
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [EnableRateLimiting("fixed")]
+        [Authorize]
+        [HttpDelete("logout")]
+        public async Task<IActionResult> Logout()
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (userId == null)
+                    return Unauthorized();
+
+                await _authService.RevokeRefreshTokenAsync(userId);
+
+                return Ok("Logged out");
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        [EnableRateLimiting("fixed")]
+        [HttpPost("confirm-email")]
+        public async Task<IActionResult> ConfirmEmail([FromBody] EmailConfirmWithOTP client, [FromQuery] string userId)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                    return BadRequest(ModelState);
+
+                await _authService.ConfirmEmailAsync(client, userId);
+                return Ok("Xác thực email thành công");
             }
             catch (Exception ex)
             {
@@ -174,20 +114,53 @@ namespace API.Controllers
             }
         }
 
-        
-        private void SetRefreshTokenCookie(string refreshToken, DateTime? expires)
+        [EnableRateLimiting("fixed")]
+        [Authorize]
+        [HttpGet("refresh")]
+        public async Task<IActionResult> Refresh()
         {
-            var cookieOptions = new CookieOptions
+            try
             {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.None,
-                Expires = expires,
-                IsEssential = true,
-                Path = "/"
-            };
+                if (!Request.Cookies.TryGetValue("refreshToken", out var refreshToken) ||
+                string.IsNullOrEmpty(refreshToken))
+                    return Unauthorized();
 
-            Response.Cookies.Append("refreshToken", refreshToken, cookieOptions);
+                var jti = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+                if (string.IsNullOrEmpty(jti))
+                    return Unauthorized();
+
+                if (await _authService.IsTokenBlacklistedAsync(jti))
+                    return Unauthorized();
+
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                string? oldRefreshToken = await _authService.GetRefreshTokenAsync(userId);
+                if (string.IsNullOrEmpty(oldRefreshToken) || refreshToken != oldRefreshToken)
+                    return Unauthorized();
+
+                var authHeader = Request.Headers.Authorization.ToString();
+                if (string.IsNullOrEmpty(authHeader))
+                    return Unauthorized();
+                string oldAccessToken = "";
+
+                if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    oldAccessToken = authHeader["Bearer ".Length..].Trim();
+                }
+
+                var response = await _authService.RefreshTokenAsync(userId, oldAccessToken);
+
+                return Ok(new
+                {
+                    response.AccessToken,
+                });
+            }
+            catch (Exception ex)
+            {
+                return Unauthorized(ex.Message);
+            }
         }
     }
 }

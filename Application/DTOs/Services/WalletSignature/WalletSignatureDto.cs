@@ -1,8 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿
 
-namespace Domain.DTOs.Services.WalletSignature
+namespace Application.DTOs.Services.WalletSignature
 {
     public class WalletSignatureDto
     {

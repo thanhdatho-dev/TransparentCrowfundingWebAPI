@@ -1,7 +1,9 @@
-﻿using Application.Interfaces.Services;
+﻿using Application.DTOs.Services.JWTs;
+using Application.Interfaces.Repositories.Services;
 using Domain.Configurations;
-using Domain.DTOs.Services.JWTs;
+using Domain.Constants;
 using Domain.Entities;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -9,37 +11,30 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Infrastructure.Repositories.Services
+namespace Infrastructure.Services
 {
-    public class TokenService(IOptions<JWT> jwtSettings) : ITokenService
+    public class TokenService(IOptions<JWT> jwtSettings, IHttpContextAccessor httpContext) : ITokenService
     {
         private readonly JWT _jwtSettings = jwtSettings.Value;
         private readonly SymmetricSecurityKey _key = new(Encoding.UTF8.GetBytes(s: jwtSettings.Value.SigningKey));
+        private readonly IHttpContextAccessor _httpContext = httpContext;
 
         public string GenerateAccessToken(User user)
         {
-            return _GenerateAccessToken(user);
-        }
-
-        public string GenerateRefreshToken()
-        {
-            return _GenerateRefreshToken();
-        }
-
-        private string _GenerateAccessToken(User user)
-        {
+            var jti = Guid.NewGuid().ToString();
             var claims = new List<Claim>
             {
-                new(JwtRegisteredClaimNames.PreferredUsername, user.UserName!),
                 new(JwtRegisteredClaimNames.Email, user.Email!),
-                new(JwtRegisteredClaimNames.EmailVerified, user.EmailConfirmed.ToString())
+                new(JwtRegisteredClaimNames.EmailVerified, user.EmailConfirmed.ToString()),
+                new(JwtRegisteredClaimNames.NameId, user.Id),
+                new(JwtRegisteredClaimNames.Jti, jti)
             };
 
             var cred = new SigningCredentials(_key, SecurityAlgorithms.HmacSha256Signature);
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddMinutes(5),
+                Expires = DateTime.UtcNow.AddMinutes(AuthConstansts.OTPExpiryMinutes),
                 SigningCredentials = cred,
                 Issuer = _jwtSettings.Issuer,
                 Audience = _jwtSettings.Audience
@@ -50,7 +45,7 @@ namespace Infrastructure.Repositories.Services
             return tokenHandler.WriteToken(token);
         }
 
-        private string _GenerateRefreshToken()
+        public string GenerateRefreshToken()
         {
             var randomNumber = new byte[32];
             using (var rng = RandomNumberGenerator.Create())
@@ -60,30 +55,12 @@ namespace Infrastructure.Repositories.Services
             }
         }
 
-        public TokenDto? RefreshToken(User user, string clientRefreshToken)
-        {
-            if (user.RefreshToken != clientRefreshToken || user.RefreshTokenExpiryTime < DateTime.UtcNow)
-                return null;
-
-            var accessToken = GenerateAccessToken(user);
-            var refreshToken = GenerateRefreshToken();
-            user.RefreshToken = refreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
-            return new TokenDto
+        public TokenDto RefreshToken(User user)
+            => new()
             {
-                AccessToken = accessToken,
-                RefreshToken = refreshToken
+                AccessToken = GenerateAccessToken(user),
+                RefreshToken = GenerateRefreshToken()
             };
-        }
-
-        public bool RevokeToken(User user)
-        {
-            if (user.RefreshTokenExpiryTime < DateTime.UtcNow)
-                return false;
-
-            user.RefreshTokenExpiryTime = DateTime.UtcNow;
-            return true;
-        }
 
         public ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
         {
@@ -109,6 +86,30 @@ namespace Infrastructure.Repositories.Services
             catch
             {
                 return null;
+            }
+        }
+
+        public async Task SetRefreshTokenCookie(string refreshToken, DateTime? expires)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(refreshToken))
+                    throw new ArgumentException("Refresh token cannot be empty");
+
+                var cookieOptions = new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.None,
+                    Expires = expires,
+                    IsEssential = true,
+                    Path = "/"
+                };
+                _httpContext.HttpContext.Response.Cookies.Append("refreshToken", refreshToken, cookieOptions);
+            }
+            catch (Exception ex)
+            {
+                throw new(ex.Message);
             }
         }
     }

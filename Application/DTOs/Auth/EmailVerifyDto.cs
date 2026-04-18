@@ -1,10 +1,7 @@
-﻿using Domain.DTOs.Services.WalletSignature;
-using System;
-using System.Collections.Generic;
+﻿using Application.DTOs.Services.WalletSignature;
 using System.ComponentModel.DataAnnotations;
-using System.Text;
 
-namespace Domain.DTOs.Auth
+namespace Application.DTOs.Auth
 {
     public class EmailVerifyDto
     {

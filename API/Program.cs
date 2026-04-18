@@ -1,17 +1,23 @@
 using API.OpenApiTransformers;
 using Application.Interfaces.Common;
+using Application.Interfaces.Repositories;
+using Application.Interfaces.Repositories.Services;
 using Application.Interfaces.Services;
+using Application.Services;
 using Domain.Configurations;
 using Domain.Entities;
 using Infrastructure.Contexts;
+using Infrastructure.Repositories;
 using Infrastructure.Repositories.Common;
-using Infrastructure.Repositories.Services;
+using Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
+using StackExchange.Redis;
+using System.IdentityModel.Tokens.Jwt;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -92,6 +98,12 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var configuration = ConfigurationOptions.Parse("localhost:6379");
+    return ConnectionMultiplexer.Connect(configuration);
+});
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(name: "AllowAll", policy =>
@@ -106,9 +118,11 @@ builder.Services.Configure<MailSettings>(builder.Configuration.GetSection("MailS
 builder.Services.Configure<JWT>(builder.Configuration.GetSection("JWT"));
 builder.Services.AddTransient(typeof(IGenericRepositoryAsync<>), typeof(GenericRepositoryAsync<>));
 builder.Services.AddTransient<IUnitOfWork, UnitOfWork>();
-builder.Services.AddTransient<IMailService, MailService>();
+builder.Services.AddTransient<IMailRepository, MailRepository>();
 builder.Services.AddTransient<IWalletSignatureVerifier, WalletSignatureVerifier>();
+builder.Services.AddTransient<ITokenRepository, TokenRepository>();
 builder.Services.AddTransient<ITokenService, TokenService>();
+builder.Services.AddTransient<IAuthService, AuthService>();
 
 var app = builder.Build();
 
