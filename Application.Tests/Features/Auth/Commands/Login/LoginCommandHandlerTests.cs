@@ -51,7 +51,7 @@ namespace Application.Tests.Features.Auth.Commands.Login
             _uowMock.Setup(x => x.Users.FindByNameAsync(normalizedWallet))
                 .ReturnsAsync(user);
             _tokenServiceMock.Setup(x => x.GenerateAccessToken(user))
-                .Returns("access-token");
+                .ReturnsAsync("access-token");
             _tokenServiceMock.Setup(x => x.GenerateRefreshToken())
                 .Returns("refresh-token");
 
@@ -115,7 +115,7 @@ namespace Application.Tests.Features.Auth.Commands.Login
                 .Returns(true);
             _uowMock.Setup(x => x.Users.FindByNameAsync(normalizedWallet))
                 .ReturnsAsync(user);
-            _tokenServiceMock.Setup(x => x.GenerateAccessToken(user)).Returns("at");
+            _tokenServiceMock.Setup(x => x.GenerateAccessToken(user)).ReturnsAsync("at");
             _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("rt");
 
             var command = new LoginCommand(ValidWallet, Message, Signature);

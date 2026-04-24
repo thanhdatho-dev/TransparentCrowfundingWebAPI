@@ -3,7 +3,6 @@ using Domain.Interfaces.Repositories;
 using Infrastructure.Identity;
 using Infrastructure.Mappers;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Repositories
 {
@@ -13,8 +12,12 @@ namespace Infrastructure.Repositories
 
         public async Task<bool> CreateAsync(User user)
         {
-            var identity = user.FromUserToAppUser();
+            var identity = user.FromUserToAppUserForCreate();
             var result = await _userManager.CreateAsync(identity).ConfigureAwait(false);
+            if (result.Succeeded)
+            {
+                await _userManager.AddToRoleAsync(identity, "User").ConfigureAwait(false);
+            }
             return result.Succeeded;
         }
 
@@ -35,7 +38,7 @@ namespace Infrastructure.Repositories
 
         public async Task<bool> UpdateAsync(User user)
         {
-            var identity = user.FromUserToAppUser();
+            var identity = user.FromUserToAppUserForCreate();
             var result = await _userManager.UpdateAsync(identity).ConfigureAwait(false);
             return result.Succeeded;
         }

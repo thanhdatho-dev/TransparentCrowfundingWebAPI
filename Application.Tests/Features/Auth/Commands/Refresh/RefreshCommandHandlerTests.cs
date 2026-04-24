@@ -51,7 +51,7 @@ namespace Application.Tests.Features.Auth.Commands.Refresh
             _uowMock.Setup(x => x.Users.FindByIdAsync(UserId))
                 .ReturnsAsync(user);
             _tokenServiceMock.Setup(x => x.GenerateAccessToken(user))
-                .Returns("new-access-token");
+                .ReturnsAsync("new-access-token");
             _tokenServiceMock.Setup(x => x.GenerateRefreshToken())
                 .Returns("new-refresh-token");
             _tokenServiceMock.Setup(x => x.GetRemainingTtl(UsedAccessToken))
@@ -138,7 +138,7 @@ namespace Application.Tests.Features.Auth.Commands.Refresh
                 .ReturnsAsync(UsedRefreshToken);
             _uowMock.Setup(x => x.Users.FindByIdAsync(UserId))
                 .ReturnsAsync(user);
-            _tokenServiceMock.Setup(x => x.GenerateAccessToken(user)).Returns("nat");
+            _tokenServiceMock.Setup(x => x.GenerateAccessToken(user)).ReturnsAsync("nat");
             _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("nrt");
             _tokenServiceMock.Setup(x => x.GetRemainingTtl(UsedAccessToken))
                 .Returns(remainingTtl);

@@ -45,7 +45,7 @@ namespace Application.Features.Auth.Commands.Refresh
             // Refresh token
             var expiry = TimeSpan.FromDays(AuthConstants.RefreshTokenExpiryDays);
             var expiryTime = DateTime.UtcNow.Add(expiry);
-            var newAccessToken = _tokenService.GenerateAccessToken(user);
+            var newAccessToken = await _tokenService.GenerateAccessToken(user).ConfigureAwait(false);
             var newRefreshToken = _tokenService.GenerateRefreshToken();
 
             var remainingTtl = _tokenService.GetRemainingTtl(request.UsedAccessToken);

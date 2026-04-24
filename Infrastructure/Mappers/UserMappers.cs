@@ -1,4 +1,4 @@
-﻿using Domain.Entities;
+using Domain.Entities;
 using Domain.ValueObjects;
 using Infrastructure.Identity;
 using System;
@@ -19,9 +19,18 @@ namespace Infrastructure.Mappers
             return user;
         }
 
-        public static AppUser FromUserToAppUser(this User user)
+        public static AppUser FromUserToAppUserForCreate(this User user)
             => new()
             {
+                UserName = user.WalletAddress.ToString(),
+                Email = user.Email.ToString(),
+                EmailConfirmed = user.EmailConfirmed
+            };
+
+        public static AppUser FromUserToAppUserForRead(this User user)
+            => new()
+            {
+                Id = user.Id.ToString(),
                 UserName = user.WalletAddress.ToString(),
                 Email = user.Email.ToString(),
                 EmailConfirmed = user.EmailConfirmed

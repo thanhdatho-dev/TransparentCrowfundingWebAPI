@@ -1,7 +1,10 @@
 using Application.Interfaces.Services;
 using Domain.Constants;
 using Domain.Entities;
+using Infrastructure.Identity;
+using Infrastructure.Mappers;
 using Infrastructure.Options;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -11,21 +14,46 @@ using System.Text;
 
 namespace Infrastructure.Services
 {
-    public class TokenService(IOptions<JWT> jwtSettings) : ITokenService
+    public class TokenService(IOptions<JWT> jwtSettings, UserManager<AppUser> userManager, ICacheService cacheService) : ITokenService
     {
         private readonly JWT _jwtSettings = jwtSettings.Value;
+        private readonly UserManager<AppUser> _userManager = userManager;
+        private readonly ICacheService _cacheService = cacheService;
         private readonly SymmetricSecurityKey _key = new(Encoding.UTF8.GetBytes(s: jwtSettings.Value.SigningKey));
 
-        public string GenerateAccessToken(User user)
+        public async Task<string> GenerateAccessToken(User user)
         {
             var jti = Guid.NewGuid().ToString();
+
+            string cacheKey = $"roles:{user.Id}";
+            string? cachedRoles = await _cacheService.GetAsync(cacheKey);
+            IList<string> roles;
+
+            if (!string.IsNullOrEmpty(cachedRoles))
+            {
+                roles = cachedRoles.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+            }
+            else
+            {
+                roles = await _userManager.GetRolesAsync(user.FromUserToAppUserForRead());
+                if (roles.Any())
+                {
+                    await _cacheService.SetAsync(cacheKey, string.Join(",", roles), TimeSpan.FromHours(1));
+                }
+            }
+
             var claims = new List<Claim>
             {
-                new(JwtRegisteredClaimNames.Email, user.Email.ToString()!),
+                new(ClaimTypes.Email, user.Email.ToString()!),
                 new(JwtRegisteredClaimNames.EmailVerified, user.EmailConfirmed.ToString()),
-                new(JwtRegisteredClaimNames.NameId, user.Id.ToString()),
+                new(ClaimTypes.NameIdentifier, user.Id.ToString()),
                 new(JwtRegisteredClaimNames.Jti, jti)
             };
+
+            foreach(var role in roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+            }
 
             var cred = new SigningCredentials(_key, SecurityAlgorithms.HmacSha256Signature);
             var tokenDescriptor = new SecurityTokenDescriptor

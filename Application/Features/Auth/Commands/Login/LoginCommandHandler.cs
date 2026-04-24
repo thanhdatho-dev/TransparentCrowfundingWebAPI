@@ -43,7 +43,7 @@ namespace Application.Features.Auth.Commands.Login
                     ErrorCodes.NotFound);
 
             // 3. Generate tokens
-            var accessToken = _tokenService.GenerateAccessToken(user);
+            var accessToken = await _tokenService.GenerateAccessToken(user).ConfigureAwait(false);
             var refreshToken = _tokenService.GenerateRefreshToken();
             var expiry = TimeSpan.FromDays(AuthConstants.RefreshTokenExpiryDays);
             var expiryTime = DateTime.UtcNow.Add(expiry);
