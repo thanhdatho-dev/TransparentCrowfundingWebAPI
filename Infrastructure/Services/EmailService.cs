@@ -1,0 +1,35 @@
+﻿using Application.Interfaces.Services;
+using Infrastructure.Options;
+using MailKit.Net.Smtp;
+using MailKit.Security;
+using Microsoft.Extensions.Options;
+using MimeKit;
+
+namespace Infrastructure.Services
+{
+    public class EmailService(IOptions<MailSettings> mailSettings) : IEmailService
+    {
+        private readonly MailSettings _mailSettings = mailSettings.Value;
+
+        public async Task SendAsync(string to, string subject, string body, CancellationToken ct = default)
+        {
+            var email = new MimeMessage();
+            email.From.Add(new MailboxAddress(_mailSettings.DisplayName, _mailSettings.Mail!));
+            email.To.Add(MailboxAddress.Parse(to));
+            email.Subject = subject!;
+            var builder = new BodyBuilder
+            {
+                HtmlBody = body
+            };
+            email.Body = builder.ToMessageBody();
+            using var smtp = new SmtpClient();
+            await smtp.ConnectAsync(
+                _mailSettings.Host!,
+                _mailSettings.Port,
+                SecureSocketOptions.StartTls, ct).ConfigureAwait(false);
+            await smtp.AuthenticateAsync(_mailSettings.Username!, _mailSettings.Password!, ct).ConfigureAwait(false);
+            await smtp.SendAsync(email, ct).ConfigureAwait(false);
+            await smtp.DisconnectAsync(true, ct).ConfigureAwait(false);
+        }
+    }
+}

@@ -1,4 +1,4 @@
-﻿using Application.Interfaces.Repositories.Services;
+﻿using Application.Interfaces.Services;
 using Nethereum.Signer;
 using Nethereum.Util;
 
